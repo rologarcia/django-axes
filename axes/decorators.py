@@ -37,7 +37,13 @@ USE_USER_AGENT = getattr(settings, 'AXES_USE_USER_AGENT', False)
 
 #see if the django app is sitting behind a reverse proxy 
 BEHIND_REVERSE_PROXY = getattr(settings, 'AXES_BEHIND_REVERSE_PROXY', False)
-#if the django app is behind a reverse proxy, look for the ip address using this HTTP header value
+
+# see if the django app is sitting behind a reverse proxy but can be accessed directly
+BEHIND_REVERSE_PROXY_WITH_DIRECT_ACCESS = getattr(settings, 'AXES_BEHIND_REVERSE_PROXY_WITH_DIRECT_ACCESS', False)
+
+IGNORE_USERNAME_IN_FAILED_LOGIN = getattr(settings, 'AXES_IGNORE_USERNAME_IN_FAILED_LOGIN', False)
+
+# if the django app is behind a reverse proxy, look for the ip address using this HTTP header value
 REVERSE_PROXY_HEADER = getattr(settings, 'AXES_REVERSE_PROXY_HEADER', 'HTTP_X_FORWARDED_FOR')
 
 
@@ -151,6 +157,9 @@ def get_user_attempts(request):
         attempts = AccessAttempt.objects.filter(
             ip_address=ip, username=username, trusted=True
         )
+
+    if IGNORE_USERNAME_IN_FAILED_LOGIN:
+        username = None
 
     if len(attempts) == 0:
         params = {'ip_address': ip, 'trusted': False}
@@ -333,7 +342,7 @@ def check_request(request, login_unsuccessful):
     user_lockable = is_user_lockable(request)
     # no matter what, we want to lock them out if they're past the number of
     # attempts allowed, unless the user is set to notlockable
-    if failures >= FAILURE_LIMIT and LOCK_OUT_AT_FAILURE and user_lockable:
+    if failures > FAILURE_LIMIT and LOCK_OUT_AT_FAILURE and user_lockable:
         # We log them out in case they actually managed to enter the correct
         # password
         logout(request)
@@ -368,15 +377,16 @@ def create_new_failure_records(request, failures):
         'failures_since_start': failures,
     }
 
-    # record failed attempt from this IP
-    AccessAttempt.objects.create(**params)
+    if not IGNORE_USERNAME_IN_FAILED_LOGIN:
+        # record failed attempt from this IP
+        AccessAttempt.objects.create(**params)
 
-    # record failed attempt on this username from untrusted IP
-    params.update({
-        'ip_address': None,
-        'username': username,
-    })
-    AccessAttempt.objects.create(**params)
+        # record failed attempt on this username from untrusted IP
+        params.update({
+            'ip_address': None,
+            'username': username,
+        })
+        AccessAttempt.objects.create(**params)
 
     log.info('AXES: New login failure by %s. Creating access record.' % (ip,))
 
